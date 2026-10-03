@@ -1,0 +1,26 @@
+[package]
+name = "syncai_lio_bridge"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]                         # one [[bin]] per node; this is the name `ros2 run` uses
+name = "lio_bridge_node"
+path = "src/main.rs"
+
+[dependencies]
+rclrs = "0.8"
+# Pinned to 0.2 to match syncai_robot_state and syncai_driver_manager; rclrs uses 0.3 internally
+# and the two crates' message types are NOT interchangeable, so never pass a type from one to an
+# API of the other (in particular, do not use `Time::to_ros_msg`; the stamp is built by hand).
+ros-env = "0.2"
+
+# Install launch/ into share/syncai_lio_bridge/ so `ros2 launch` finds it. There is no params/
+# directory: like the C++ version, the launch file passes every parameter inline.
+[package.metadata.ros]
+install_to_share = ["launch"]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

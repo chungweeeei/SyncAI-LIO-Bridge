@@ -1,0 +1,107 @@
+// VS Code Dev Container for developing this package on its own. In production the package is
+// vcs-imported into SyncAI-Robot-Workspace, which has its own image; nothing here is used there.
+//
+// The container builds a colcon workspace around the repo: /workspace is a named volume (build/
+// install/ log/), and the repo is bind-mounted at /workspace/src/syncai_lio_bridge, the same path
+// it has in SyncAI-Robot-Workspace. Unlike the robot_state and driver_manager containers there is
+// nothing to vcs-import: this node uses only standard message packages, so the workspace holds
+// this one package.
+//
+// The image and the volume names are this repo's own, so this container can run side by side with
+// the SyncAI-Robot-State and SyncAI-Robot-Driver-Manager ones (same ROS_DOMAIN_ID, so the nodes
+// do see each other).
+{
+  "name": "SyncAI LIO Bridge (ROS 2 + Rust)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "ROS_DISTRO": "humble",
+      // Always the ros user with uid/gid 1000, regardless of the host user
+      "USER_UID": "1000",
+      "USER_GID": "1000",
+      // Also install Claude Code inside the Dev Container
+      "INSTALL_CLAUDE_CODE": "true"
+    }
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/src/syncai_lio_bridge,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace/src/syncai_lio_bridge",
+  "mounts": [
+    "source=syncai-lio-bridge_workspace,target=/workspace,type=volume",
+    "source=syncai-lio-bridge_cargo-registry,target=/home/ros/.cargo/registry,type=volume",
+    "source=syncai-lio-bridge_cargo-git,target=/home/ros/.cargo/git,type=volume",
+    // Claude Code settings and login, so rebuilding the container does not require logging in again
+    "source=syncai-lio-bridge_claude-config,target=/home/ros/.claude,type=volume"
+  ],
+  "runArgs": [
+    // Fixed name so `docker exec syncai-lio-bridge ...` works from the host
+    "--name=syncai-lio-bridge",
+    // tini as PID 1 so zombie processes left behind after Ctrl-C get reaped
+    "--init",
+    // Host network: DDS goes over the physical NIC / lo, not the docker bridge, so this container
+    // shares a ROS graph with the other dev containers and with the robot
+    "--network=host"
+  ],
+  "containerEnv": {
+    // 2 matches the robot_state and driver_manager dev containers, so the nodes see each other's
+    // topics. Change this to isolate from other ROS graphs on the same machine (the real robot is
+    // domain 1).
+    "ROS_DOMAIN_ID": "2",
+    "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp"
+  },
+  // Build once so rust-analyzer finds the generated message crates and the colcon-ros-cargo
+  // .cargo/config.toml
+  "postCreateCommand": "cd /workspace && colcon build --symlink-install",
+
+  // Both the container and the VS Code server run as ros (uid/gid 1000), not root
+  "containerUser": "ros",
+  "remoteUser": "ros",
+  // Do not remap the uid to the host user; keep it at 1000
+  "updateRemoteUserUID": false,
+
+  // Use a login shell for the environment so rust-analyzer and friends see the sourced ROS 2 env
+  "userEnvProbe": "loginInteractiveShell",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-xml",
+        "ms-python.python",
+        "ms-vscode.cpptools",
+        "ranch-hand-robotics.rde-ros-2",
+        "anthropic.claude-code"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        // Keep target/ in the workspace volume to avoid compiling on a macOS bind mount
+        "rust-analyzer.cargo.targetDir": "/workspace/build/.rust-analyzer",
+        "rust-analyzer.check.command": "clippy",
+
+        // Format on save: Rust goes through rust-analyzer (which reads rustfmt.toml next to Cargo.toml)
+        "files.autoSave": "onFocusChange",
+        "[rust]": {
+          "editor.defaultFormatter": "rust-lang.rust-analyzer",
+          "editor.formatOnSave": true
+        },
+        "[toml]": {
+          "editor.defaultFormatter": "tamasfe.even-better-toml",
+          "editor.formatOnSave": true
+        },
+        "[xml]": {
+          "editor.defaultFormatter": "redhat.vscode-xml",
+          "editor.formatOnSave": true
+        },
+        "files.insertFinalNewline": true,
+        "files.trimTrailingWhitespace": true,
+        "files.watcherExclude": {
+          "**/build/**": true,
+          "**/install/**": true,
+          "**/log/**": true,
+          "**/target/**": true
+        }
+      }
+    }
+  }
+}

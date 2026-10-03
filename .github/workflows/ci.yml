@@ -1,0 +1,96 @@
+# CI for syncai_lio_bridge.
+#
+# The package can only be compiled against ROS 2 Humble plus the ros2_rust underlay, so the
+# `check` job builds the repo's own Dev Container image (.devcontainer/Dockerfile) with buildx and
+# runs the same three commands CLAUDE.md lists inside it. The image layers are kept in the GitHub
+# Actions cache: the first run compiles rclrs from source (slow), later runs reuse it until the
+# Dockerfile changes or the cache entry is evicted.
+#
+# `fmt` runs on the bare runner: rustfmt needs no ROS, so it answers in well under a minute.
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # The same toolchain the Dockerfile installs (ARG RUST_VERSION), so rustfmt agrees with the
+      # one developers run inside the container.
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  check:
+    name: colcon build / clippy / test
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      # The same layout as the Dev Container: a colcon workspace with this repo at
+      # src/syncai_lio_bridge (and nothing else: this node needs no shared message package).
+      - uses: actions/checkout@v7
+        with:
+          path: src/syncai_lio_bridge
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the Dev Container image
+        uses: docker/build-push-action@v7
+        with:
+          context: src/syncai_lio_bridge/.devcontainer
+          build-args: |
+            ROS_DISTRO=humble
+            INSTALL_CLAUDE_CODE=false
+          load: true
+          tags: syncai-lio-bridge-ci:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Kept OUTSIDE the colcon workspace on purpose: colcon crawls /workspace for packages and
+      # colcon-cargo treats every Cargo.toml as one, so a restored registry inside it turns into
+      # hundreds of bogus packages and "Unable to order packages topologically".
+      - name: Restore the cargo registry
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/cargo-registry
+          key: cargo-registry-${{ hashFiles('src/syncai_lio_bridge/Cargo.lock') }}
+          restore-keys: cargo-registry-
+
+      # The image runs as `ros` (uid 1000) and the runner as uid 1001; the container has to be
+      # able to write build/ install/ log/ into the bind-mounted workspace and the registry.
+      - name: Hand the workspace to the container user
+        run: |
+          mkdir -p "$RUNNER_TEMP/cargo-registry"
+          sudo chown -R 1000:1000 "$GITHUB_WORKSPACE" "$RUNNER_TEMP/cargo-registry"
+
+      # ROS_DOMAIN_ID=77 so a test that initialises rcl can never join a real graph (the runner
+      # has none, but the habit is the point). RMW_IMPLEMENTATION matches devcontainer.json.
+      - name: Build, lint and test inside the container
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --volume "$RUNNER_TEMP/cargo-registry:/home/ros/.cargo/registry" \
+            --env ROS_DOMAIN_ID=77 \
+            --env RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
+            syncai-lio-bridge-ci:latest \
+            bash /workspace/src/syncai_lio_bridge/.github/scripts/ci.sh
+
+      # Give the files back so the checkout and cache post-steps can clean up and save.
+      - name: Hand the workspace back to the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/cargo-registry"

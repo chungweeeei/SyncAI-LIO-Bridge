@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>syncai_lio_bridge</name>
+  <version>0.1.0</version>
+  <description>
+    Bridges FAST-LIO2 / Point-LIO 3D localization onto the planar TF chain the nav stack
+    expects: consumes map->lio_body (localizer + lio_node) and publishes odom->base_link,
+    the odom topic, and the AMCL-style map->&lt;robot_id&gt;/odom correction.
+  </description>
+  <maintainer email="chungweeeei@gmail.com">chungwei</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclrs</depend>
+  <depend>rosidl_runtime_rs</depend>
+  <!-- Message packages are declared here, NOT in Cargo.toml: colcon-ros-cargo puts them on
+       AMENT_PREFIX_PATH and wires them into the `ros_env` crate at build time, and without a
+       <depend> here `ros_env::<pkg>` simply does not exist. -->
+  <depend>builtin_interfaces</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <!-- rclrs has no tf2 / tf2_ros binding, so this node does its own TF work off the /tf and
+       /tf_static topics (lookup in src/lio_bridge_node/tf.rs, broadcast as a plain /tf publisher)
+       and needs only the message package.
+
+       Unlike the packages above, tf2_msgs is NOT rebuilt by the ros2_rust underlay (ros2_rust's
+       .repos lists common_interfaces and rcl_interfaces; tf2_msgs lives in ros2/geometry2). It
+       does not need to be: the official ros-humble-tf2-msgs deb already ships generated Rust
+       bindings at share/tf2_msgs/rust, which is what this package links against. If a future base
+       image ever stops shipping them, add geometry2's tf2_msgs to the underlay's .repos. -->
+  <depend>tf2_msgs</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>
