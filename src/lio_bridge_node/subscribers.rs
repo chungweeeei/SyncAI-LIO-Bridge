@@ -20,7 +20,7 @@ use super::state::LioBridgeData;
 
 /// tf2's own listener QoS: depth 100 and reliable, with `/tf_static` additionally transient-local
 /// so the static transforms published before this node started are still delivered. Without the
-/// transient-local the `base_link -> lidar_top` extrinsic — published exactly once by
+/// transient-local the `base_link -> lidar_top_imu` extrinsic — published exactly once by
 /// `robot_state_publisher`, usually long before this node starts — would never arrive.
 pub const TF_DEPTH: u32 = 100;
 

@@ -46,7 +46,7 @@ pub struct LioBridgeData {
     lio_linear: [f64; 2],
     /// Yaw rate from the lidar IMU gyro, not from LIO — see [`Self::accept_imu`].
     yaw_rate: f64,
-    /// `base_link -> lidar_top`, looked up once and cached: it is a static transform from the
+    /// `base_link -> lidar_top_imu`, looked up once and cached: it is a static transform from the
     /// URDF, so there is nothing to re-read.
     base_lidar: Option<Transform>,
     /// Whether the first `map -> odom` has gone out. Only drives the one-shot "localization
@@ -219,11 +219,12 @@ impl LioBridgeData {
         }
     }
 
-    /// The cached static `base_link -> lidar_top` mount extrinsic, looked up on first use.
+    /// The cached static `base_link -> lidar_top_imu` mount extrinsic, looked up on first use.
     ///
     /// Until it resolves the node publishes nothing at all — not even the odom chain — because
     /// the whole tick depends on it. `lidar_frame` must therefore name a real frame: it comes
-    /// from the URDF's `lidar_top_joint`, published by `syncai_bringup`.
+    /// from the URDF's `lidar_top_joint` and `lidar_top_imu_joint` (two static links, which the
+    /// lookup walks), published by `syncai_bringup`.
     fn base_lidar(&mut self) -> Option<Transform> {
         if let Some(cached) = self.base_lidar {
             return Some(cached);

@@ -4,7 +4,7 @@
 //! unit-tested here against hand-computable poses, without a ROS environment or the robot.
 //!
 //! ```text
-//! odom -> base  =  (lio_odom -> lio_body) · (base_link -> lidar_top)⁻¹        then P2D
+//! odom -> base  =  (lio_odom -> lio_body) · (base_link -> lidar_top_imu)⁻¹    then P2D
 //! map  -> base  =  (map -> lio_odom) · (lio_odom -> base)                      (unprojected)
 //! map  -> odom  =  P2D(map -> base) · P2D(odom -> base)⁻¹
 //! ```
@@ -26,9 +26,11 @@ pub struct OdomChain {
 
 /// `odom -> base_link` from the LIO pose and the lidar mount extrinsic.
 ///
-/// Point-LIO's "body" frame is physically the lidar, so the static `base_link -> lidar_top`
-/// extrinsic maps it back to the robot base: `lio_odom -> base = lio_odom -> lio_body · lidar ->
-/// base`. The LIO odom frame is then taken to BE the odom frame — nothing else publishes one.
+/// Point-LIO's "body" frame is physically the lidar's built-in IMU, so the static
+/// `base_link -> lidar_top_imu` extrinsic (the lidar mount plus the IMU's offset inside the
+/// lidar, from the URDF) maps it back to the robot base: `lio_odom -> base = lio_odom -> lio_body
+/// · lidar -> base`, where `lidar` is that IMU link. The LIO odom frame is then taken to BE the
+/// odom frame — nothing else publishes one.
 pub fn odom_to_base(lio_pose: Transform, base_lidar: Transform) -> OdomChain {
     let lio_odom_base = lio_pose.then(base_lidar.inverse());
     OdomChain {

@@ -66,7 +66,10 @@ def launch_setup(context, *args, **kwargs):
                 "map_frame": "map",
                 "base_frame": f"{robot_id}/base_link",
                 "odom_frame": f"{robot_id}/odom",
-                "lidar_frame": f"{robot_id}/lidar_top",
+                # The lidar's IMU, which is what Point-LIO's body frame is: lidar_top_imu
+                # hangs under lidar_top (the lidar) in syncai_bringup's G23.urdf. It was
+                # lidar_top until 2026-10, ~5 cm off; the C++ version's value.
+                "lidar_frame": f"{robot_id}/lidar_top_imu",
                 "publish_rate": 20.0,
                 "transform_tolerance": 0.1,
             }

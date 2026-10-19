@@ -133,5 +133,6 @@ lookup's answer; `tf.rs` has a test for exactly that.
   `unsafe_code = "forbid"` and `clippy::all`.
 - Commits use Conventional Commits (`.github/prompt/copilot-commit-message-instructions.md`), in
   English.
-- The launch file is byte-for-byte the C++ package's; a change to how `robot_id` is read belongs
-  in both.
+- The launch file is byte-for-byte the C++ package's apart from `lidar_frame`, which names
+  `lidar_top_imu` (the lidar's IMU) since 2026-10 — the README's "Differences from the C++
+  version" has why; a change to how `robot_id` is read belongs in both.
