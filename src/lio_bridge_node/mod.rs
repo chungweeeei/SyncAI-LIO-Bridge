@@ -23,9 +23,9 @@ use subscribers::Subscriptions;
 /// consumes:
 ///
 /// ```text
-/// odom -> base_link   from pointlio/lio_odom, projected to 2D (lio_body is physically
-///                     <robot_id>/lidar_top, so the static base_link -> lidar_top extrinsic
-///                     maps it to base)
+/// odom -> base_link   from pointlio/lio_odom, projected to 2D (lio_body is physically the
+///                     lidar's IMU, <robot_id>/lidar_top_imu, so the static
+///                     base_link -> lidar_top_imu extrinsic maps it to base)
 /// odom                nav_msgs/Odometry republished for the twist consumers (controller_server,
 ///                     task_runner, robot_state); linear velocity from LIO (body frame),
 ///                     angular.z from the lidar IMU gyro — a deliberate choice, not a fallback

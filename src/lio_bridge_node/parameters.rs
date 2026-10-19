@@ -65,8 +65,9 @@ pub struct Config {
     /// `<robot_id>/` itself.
     pub base_frame: String,
     pub odom_frame: String,
-    /// Must name the URDF's lidar link (`lidar_top`), published by `syncai_bringup`. Without it
-    /// the node publishes nothing at all — the extrinsic lookup gates the whole timer body.
+    /// Must name the URDF's link for the lidar's IMU (`lidar_top_imu`), published by
+    /// `syncai_bringup`. Without it the node publishes nothing at all — the extrinsic lookup gates
+    /// the whole timer body.
     pub lidar_frame: String,
     pub publish_period: Duration,
     /// How far ahead of `now` every TF stamp is dated, the same trick AMCL uses: consumers can
@@ -125,8 +126,8 @@ impl Parameters {
         )?;
         let lidar_frame = text(
             "lidar_frame",
-            "lidar_top",
-            "the URDF lidar link Point-LIO's body frame physically is; must exist in TF",
+            "lidar_top_imu",
+            "the URDF link of the lidar IMU Point-LIO's body frame physically is; must exist in TF",
         )?;
         let publish_rate = number(
             "publish_rate",

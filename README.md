@@ -23,8 +23,9 @@ provider** — it replaces wheel odometry *and* AMCL at the same time.
 ```
   localizer            pointlio                      URDF (robot_state_publisher)
       │                    │                                    │
-   map ──► <id>/pointlio_odom ──► <id>/pointlio_body      <id>/base_link ──► <id>/lidar_top
-      (TF, after relocalize)   (TF + pointlio/lio_odom)          (static, from lidar_top_joint)
+   map ──► <id>/pointlio_odom ──► <id>/pointlio_body  <id>/base_link ──► <id>/lidar_top_imu
+      (TF, after relocalize)   (TF + pointlio/lio_odom)   (static, via <id>/lidar_top: the
+                                                           lidar_top and lidar_top_imu joints)
                                         │
                                         ▼
                                ┌─────────────────┐
@@ -71,15 +72,16 @@ All three are produced by a single timer at `publish_rate` (20 Hz by default), i
 
 ### The math
 
-**odom → base_link.** Point-LIO's "body" frame is physically the lidar, so the lidar mount
-extrinsic maps it back to the robot base:
+**odom → base_link.** Point-LIO's "body" frame is physically the lidar's built-in IMU, so the
+static extrinsic to that IMU — the lidar mount plus the IMU's offset inside the lidar, both from
+the URDF — maps it back to the robot base:
 
 ```
-odom→base  =  (lio_odom→lio_body) · (base_link→lidar_top)⁻¹
+odom→base  =  (lio_odom→lio_body) · (base_link→lidar_top_imu)⁻¹
 ```
 
 then projected to 2D. The static extrinsic is looked up once and cached; until it resolves, the
-node logs a throttled "waiting for base_link -> lidar_top" and publishes nothing.
+node logs a throttled "waiting for base_link -> lidar_top_imu" and publishes nothing.
 
 **map → odom.** The AMCL-style correction, computed exactly as AMCL does — the map-frame pose
 minus the odom-frame pose:
@@ -141,7 +143,7 @@ declared read-only, so `ros2 param set` is rejected rather than silently ignored
 | `map_frame` | `map` | `map` | Never namespaced |
 | `base_frame` | `base_link` | `<robot_id>/base_link` | |
 | `odom_frame` | `odom` | `<robot_id>/odom` | |
-| `lidar_frame` | `lidar_top` | `<robot_id>/lidar_top` | Must match the URDF's `lidar_top` link |
+| `lidar_frame` | `lidar_top_imu` | `<robot_id>/lidar_top_imu` | Must match the URDF's `lidar_top_imu` link (the lidar's IMU); `lidar_top` until 2026-10 |
 | `publish_rate` | `20.0` | `20.0` | Hz; a non-positive or non-finite value falls back to 1 Hz |
 | `transform_tolerance` | `0.1` | `0.1` | Seconds the TF stamp is future-dated; negative / NaN becomes 0 |
 | `use_sim_time` | — | **`false`** | No `/clock` on the real robot; pass `use_sim_time:=true` only against a simulator |
@@ -167,7 +169,7 @@ The node's own log is the fastest diagnosis — each failure mode has a distinct
 | Log line | Missing |
 |---|---|
 | `waiting for pointlio/lio_odom (LIO initializing?)` | Point-LIO is not publishing |
-| `waiting for <id>/base_link -> <id>/lidar_top` | `bringup` / `robot_state_publisher` is not running |
+| `waiting for <id>/base_link -> <id>/lidar_top_imu` | `bringup` / `robot_state_publisher` is not running, or its URDF predates the `lidar_top_imu` link (SyncAI-Robot-Workspace before PR #44) |
 | `waiting for TF (relocalized yet?)` | `/<robot_id>/relocalize` has not been called (and no `[initial_pose]` / `initialpose` has stood in for it) |
 
 ## Why Docker
@@ -231,16 +233,17 @@ Use a separate `ROS_DOMAIN_ID` so the fakes can never reach the real robot:
 export ROS_DOMAIN_ID=77
 ros2 run syncai_lio_bridge lio_bridge_node --ros-args -r __ns:=/default_robot \
     -p base_frame:=default_robot/base_link -p odom_frame:=default_robot/odom \
-    -p lidar_frame:=default_robot/lidar_top
+    -p lidar_frame:=default_robot/lidar_top_imu
 ```
 
 Expect `waiting for pointlio/lio_odom (LIO initializing?)` every 5 s. Then, in other shells (same
 `ROS_DOMAIN_ID`):
 
 ```bash
-# The lidar mount: 0.2 m ahead, 0.5 m up, pitched 0.25 rad (static, so transient-local)
+# The lidar IMU's mount: 0.2 m ahead, 0.5 m up, pitched 0.25 rad (static, so transient-local;
+# one link standing in for the URDF's base_link -> lidar_top -> lidar_top_imu)
 ros2 run tf2_ros static_transform_publisher --x 0.2 --z 0.5 --pitch 0.25 \
-    --frame-id default_robot/base_link --child-frame-id default_robot/lidar_top
+    --frame-id default_robot/base_link --child-frame-id default_robot/lidar_top_imu
 
 # LIO says the lidar is 1 m along pointlio_odom's x, moving at 0.5 m/s
 ros2 topic pub -r 10 /default_robot/pointlio/lio_odom nav_msgs/msg/Odometry \
@@ -324,6 +327,13 @@ robot, the same split `tf.rs` has in syncai_robot_state.
   shutdown terminates the process with the default action and `Drop` does not run. A process
   backgrounded with `&` from a non-interactive shell script ignores SIGINT; stop it with SIGTERM
   in scripts.
+* **`lidar_frame` is `<robot_id>/lidar_top_imu`, not `<robot_id>/lidar_top`** (2026-10), in the
+  launch file and the code default. The C++ version, and this port until then, mapped the
+  Point-LIO body through `lidar_top` as if the body frame were the lidar; it is the lidar's
+  built-in IMU, `t_il` (~5 cm on the MID360) away, which put `base_link` ~2.3 cm sideways in the
+  plane. SyncAI-Robot-Workspace's URDF has carried both links since its PR #44 — `lidar_top`
+  for the lidar, the frame its cloud is stamped with, and `lidar_top_imu` under it at `-t_il` —
+  and this is the one place the launch file differs from the C++ one.
 * **Log lines carry a `[LioBridge]` / `[Parameters]` prefix**, following the convention of the
   other Rust nodes. The message text after the prefix is the C++ text, so the diagnosis table
   above still greps.
@@ -334,8 +344,9 @@ robot, the same split `tf.rs` has in syncai_robot_state.
   there is no `/clock`; with `use_sim_time: true` `now()` returns zero and every TF stamp and odom
   header is garbage. The byobu session launches this node with no arguments, so do not flip the
   launch default without also editing `config/sessions/start_nav.yaml` in the Workspace.
-- **`lidar_frame` must name a real frame.** It comes from the URDF's `lidar_top_joint`, published
-  by `bringup`. Without it the node publishes *nothing at all* — not even the odom chain — because
+- **`lidar_frame` must name a real frame.** It comes from the URDF's `lidar_top_joint` and
+  `lidar_top_imu_joint`, published by `bringup` — so this node needs a Workspace whose URDF has
+  the `lidar_top_imu` link (PR #44 onwards). Without it the node publishes *nothing at all* — not even the odom chain — because
   the extrinsic lookup gates the whole timer body.
 - **The odom pose is a planar projection**, so `position.z` is always 0 and the orientation only
   has a yaw component. Do not use this topic as a 3D pose source; `pointlio/lio_odom` is the full

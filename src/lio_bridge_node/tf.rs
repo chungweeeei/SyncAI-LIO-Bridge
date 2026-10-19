@@ -76,7 +76,7 @@ impl fmt::Display for InvalidTransform {
 pub enum LookupError {
     /// Nothing has ever been published about this frame. On this stack it is the normal state
     /// before `syncai_localizer` has been relocalized (`map` has never been mentioned) and before
-    /// `syncai_bringup` is up (`lidar_top` has never been mentioned).
+    /// `syncai_bringup` is up (`lidar_top_imu` has never been mentioned).
     UnknownFrame(String),
     /// Both frames are known but sit in trees that do not meet — usually a half-built TF graph.
     NotConnected { target: String, source: String },
