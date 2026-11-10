@@ -101,10 +101,35 @@ without throwing away the tilt before the map-frame composition. Both formulas l
 ### Everything is projected to 2D
 
 `Pose2D::project()` keeps `x`, `y` and `yaw = atan2(R[1][0], R[0][0])`, and zeroes `z`, roll and
-pitch. This happens before every broadcast so the planar nav stack never sees a tilted frame —
-which matters here more than on a wheeled robot, because the quadruped's body pitches and rolls
-with every gait cycle and the lidar itself is mounted at a 0.25 rad tilt. A costmap fed a tilted
-`base_link` would smear obstacles.
+pitch. This happens before every broadcast so the planar half of the nav stack never sees a
+tilted frame — which matters here more than on a wheeled robot, because the quadruped's body
+pitches and rolls with every gait cycle and the lidar itself is mounted at a 0.25 rad tilt.
+
+The stack navigates on 3D maps only, but what still needs the projection is the nav2 half of it,
+not the obstacle data:
+
+- **`odom`'s XY plane must be level.** The controller's local costmap is a 2D grid in `odom`, and
+  its terrain layer reads heights as `odom` z. `map → odom` is the planar difference above, so
+  `odom` never picks up a roll, pitch or z drift.
+- **The controllers are planar.** MPPI and RPP 3D (nav2 ports) take the robot pose as
+  (x, y, yaw), transform the plan into the robot frame, measure lookahead with `hypot(x, y)` and
+  command `cmd_vel` vx / vy / wz. A `base_link` swaying with the gait would mix the path's height
+  into its x on a stair and shake the carrot and MPPI's initial state every step.
+- **The `odom` twist is a ground velocity**, with no vertical component mixed in.
+- **Docking** transforms the dock pose into `odom` once, at acceptance, and relies on it staying
+  planar for the rest of the approach.
+
+The terrain layer itself would not care: it transforms `pointlio/body_cloud` from
+`<id>/pointlio_body` through the 3D `map → <id>/pointlio_odom → <id>/pointlio_body` branch, never
+through `base_link`. (The older reason given here — a costmap fed a tilted `base_link` smears
+obstacles — was the 2D obstacle layer's, removed from the workspace on 2026-10-28.)
+
+**Height does not come from this chain.** Every consumer that needs the ground under the robot
+(the planner's start, both 3D controllers, the controller server's goal check, the task runner's
+waypoint drop, the localizer's last pose, `syncai_robot_state`) reads `<id>/pointlio_body`'s z in
+`map` minus `lidar_height` (0.481, kept equal in each of their params). That subtraction ignores
+pitch: the lidar sits 0.195 m ahead of `base_link`, so on a 30° stair the ground estimate is off by
+about 0.1 m — inside the stack's z tolerances, but not zero.
 
 ### Angular velocity comes from the IMU
 
