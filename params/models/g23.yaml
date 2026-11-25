@@ -1,0 +1,17 @@
+# The G23's IMU, for lio_bridge.launch.py: read when the system INI's [system] robot_model is g23
+# (or names none). The values are the ones hard-coded in the launch and in subscribers.rs until
+# 2026-11-25.
+#
+# Bare /** key: rclrs does not expand /**/lio_bridge_node. There is no shared params file under
+# this one -- the launch still passes everything that is the same on every robot inline.
+/**:
+  ros__parameters:
+    # The URDF link Point-LIO's body frame physically is, which closes the chain back onto
+    # base_link (odom -> base = (lio_odom -> lio_body) . (base_link -> lidar_frame)^-1): the
+    # MID360's own IMU, which syncai_bringup's G23.urdf has as lidar_top_imu under lidar_top.
+    # lidar_top itself until 2026-10, ~5 cm off. The launch prefixes it with <robot_id>/.
+    lidar_frame: "lidar_top_imu"
+
+    # That IMU's samples, read for the odom topic's yaw rate. Relative: the Livox driver
+    # publishes it under /<robot_id>.
+    imu_topic: "livox/imu"

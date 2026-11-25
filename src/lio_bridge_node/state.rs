@@ -44,10 +44,14 @@ pub struct LioBridgeData {
     lio_odom_frame: String,
     /// Body-frame linear velocity from LIO's own twist.
     lio_linear: [f64; 2],
-    /// Yaw rate from the lidar IMU gyro, not from LIO — see [`Self::accept_imu`].
+    /// Yaw rate from the IMU's gyro (`imu_topic`), not from LIO — see [`Self::accept_imu`].
     yaw_rate: f64,
-    /// `base_link -> lidar_top_imu`, looked up once and cached: it is a static transform from the
-    /// URDF, so there is nothing to re-read.
+    /// Whether any IMU sample has arrived. Until one has, `yaw_rate` is the 0 it started at and
+    /// the odom topic says the robot is not turning; the tick says so (a wrong `imu_topic` for
+    /// the robot model looks exactly like that, and nothing else reports it).
+    imu_seen: bool,
+    /// `base_link -> lidar_frame` (the G23's `lidar_top_imu`, the M20's `imu`), looked up once
+    /// and cached: it is a static transform from the URDF, so there is nothing to re-read.
     base_lidar: Option<Transform>,
     /// Whether the first `map -> odom` has gone out. Only drives the one-shot "localization
     /// bridged" log line, which is the definitive "the robot is localized" signal.
@@ -73,6 +77,7 @@ impl LioBridgeData {
             lio_odom_frame: String::new(),
             lio_linear: [0.0, 0.0],
             yaw_rate: 0.0,
+            imu_seen: false,
             base_lidar: None,
             localized: false,
         }
@@ -104,8 +109,10 @@ impl LioBridgeData {
         self.lio_linear = linear;
     }
 
-    /// The latest `livox/imu` gyro z. The IMU is co-located with the lidar and the robot is
-    /// treated as planar, so gyro z is the yaw rate.
+    /// The latest gyro z on `imu_topic` (the G23's `livox/imu`, the M20's `/IMU`). The robot is
+    /// treated as planar, so gyro z is the yaw rate: the G23's IMU is inside its lidar, whose
+    /// 0.25 rad pitch this has always ignored, and the M20's is the body's, its axes the body's
+    /// (gravity reads along +z at rest, SyncAI-Robot-Workspace's syncai_pointlio m20.yaml).
     ///
     /// The raw gyro is used in preference to Point-LIO's own `twist.angular`, which
     /// `pointlio_node` does populate from its EKF output-model state `x().omg`. An earlier
@@ -122,6 +129,7 @@ impl LioBridgeData {
     /// Same residual bias either way — and nothing downstream integrates it — but Point-LIO's
     /// is 5.9x noisier. Switching would only add noise.
     pub fn accept_imu(&mut self, gyro_z: f64) {
+        self.imu_seen = true;
         self.yaw_rate = gyro_z;
     }
 
@@ -180,7 +188,17 @@ impl LioBridgeData {
         );
 
         // Odometry topic for the twist consumers (controller_server, task_runner, robot_state —
-        // none of them read the pose; they take it from TF).
+        // none of them read the pose; they take it from TF). Still published without an IMU
+        // sample — the pose chain does not need one — but said, because the yaw rate is then a
+        // constant 0 that reads as a robot standing still.
+        if !self.imu_seen {
+            log_warn!(
+                self.logger.throttle(WAIT_LOG_THROTTLE),
+                "[LioBridge] no sample on imu_topic '{}' yet: the odom topic's angular.z is 0 \
+                 until one arrives (is that this robot model's IMU topic, and is it published?)",
+                self.config.imu_topic,
+            );
+        }
         self.publish_odom(stamp_of(now.nsec), chain.odom_base);
 
         // map -> odom: needs the localizer's map -> lio_odom, which only exists after
@@ -219,12 +237,14 @@ impl LioBridgeData {
         }
     }
 
-    /// The cached static `base_link -> lidar_top_imu` mount extrinsic, looked up on first use.
+    /// The cached static `base_link -> lidar_frame` mount extrinsic, looked up on first use.
     ///
     /// Until it resolves the node publishes nothing at all — not even the odom chain — because
-    /// the whole tick depends on it. `lidar_frame` must therefore name a real frame: it comes
-    /// from the URDF's `lidar_top_joint` and `lidar_top_imu_joint` (two static links, which the
-    /// lookup walks), published by `syncai_bringup`.
+    /// the whole tick depends on it. `lidar_frame` must therefore name a real frame of the
+    /// robot model's URDF, published by `syncai_bringup`: on the G23 it comes from
+    /// `lidar_top_joint` and `lidar_top_imu_joint` (two static links, which the lookup walks),
+    /// on the M20 from `imu_joint`. A G23 name on an M20 waits here for good, which is why the
+    /// name is in the model's params file and not in the launch.
     fn base_lidar(&mut self) -> Option<Transform> {
         if let Some(cached) = self.base_lidar {
             return Some(cached);

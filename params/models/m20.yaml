@@ -1,0 +1,22 @@
+# The DEEP Robotics Lynx M20's IMU, for lio_bridge.launch.py: read when the system INI's
+# [system] robot_model is m20.
+#
+# Bare /** key: rclrs does not expand /**/lio_bridge_node.
+/**:
+  ros__parameters:
+    # The URDF link Point-LIO's body frame physically is. On the M20 that is the vendor's body
+    # IMU, which syncai_bringup's M20.urdf has as `imu`, (0.0632, -0.0268, 0.0435) on base_link
+    # (DEEP Robotics' MJCF imu_site; syncai_pointlio's params/models/m20.yaml carries the inverse
+    # as t_il). M20.urdf has no lidar_top_imu: with the G23's name the base_link -> lidar_frame
+    # lookup never resolves and this node publishes nothing at all. Not lidar_link, the merged
+    # cloud's frame at base_link's origin: Point-LIO's state is the IMU's, 8 cm from it. The
+    # launch prefixes it with <robot_id>/.
+    lidar_frame: "imu"
+
+    # The vendor stack's body IMU (sensor_msgs/Imu, ~200 Hz, reliable writer), published on DDS
+    # domain 0 from the robot's other computers with NO namespace -- absolute for that reason, the
+    # one topic this node names outside /<robot_id>, and only because the publisher is not ours
+    # (a relative name would resolve to /<robot_id>/IMU and the yaw rate would stay 0). Its axes
+    # are the body's (gravity reads along +z at rest, robot01 2026-11-24), so gyro z is the yaw
+    # rate with no rotation.
+    imu_topic: "/IMU"

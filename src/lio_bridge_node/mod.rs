@@ -23,12 +23,14 @@ use subscribers::Subscriptions;
 /// consumes:
 ///
 /// ```text
-/// odom -> base_link   from pointlio/lio_odom, projected to 2D (lio_body is physically the
-///                     lidar's IMU, <robot_id>/lidar_top_imu, so the static
-///                     base_link -> lidar_top_imu extrinsic maps it to base)
+/// odom -> base_link   from pointlio/lio_odom, projected to 2D (lio_body is physically an IMU —
+///                     the G23's <robot_id>/lidar_top_imu, the M20's <robot_id>/imu; the
+///                     `lidar_frame` parameter — so the static base_link -> lidar_frame
+///                     extrinsic maps it to base)
 /// odom                nav_msgs/Odometry republished for the twist consumers (controller_server,
 ///                     task_runner, robot_state); linear velocity from LIO (body frame),
-///                     angular.z from the lidar IMU gyro — a deliberate choice, not a fallback
+///                     angular.z from that IMU's gyro (`imu_topic`) — a deliberate choice, not
+///                     a fallback
 /// map -> odom         AMCL-style correction using the localizer's map -> lio_odom TF:
 ///                     map -> odom = P2D(map -> base) · inv(P2D(odom -> base))
 /// ```
@@ -60,6 +62,9 @@ impl LioBridgeNode {
     pub fn new(node: Node) -> Result<Self, Box<dyn Error>> {
         let (parameters, config) = Parameters::declare(&node)?;
         let publish_period = config.publish_period;
+        // Taken out before `config` moves into the worker's data: the IMU subscription is made
+        // on this name.
+        let imu_topic = config.imu_topic.clone();
 
         // Reliable, depth 10 — the rclcpp `create_publisher("odom", 10)` default. Both the
         // SensorData (best-effort) subscribers of robot_state and the reliable nav odom
@@ -77,7 +82,7 @@ impl LioBridgeNode {
             node.logger().clone(),
         ));
 
-        let subscriptions = Subscriptions::create(&worker)?;
+        let subscriptions = Subscriptions::create(&worker, &imu_topic)?;
         // The default timer clock is steady time, i.e. the C++ `create_wall_timer`: the publish
         // cadence does not follow /clock even under use_sim_time. The stamps written into the
         // messages do — they come from the node clock.

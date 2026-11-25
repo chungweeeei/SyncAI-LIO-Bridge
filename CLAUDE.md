@@ -16,8 +16,11 @@ layout and conventions this repo copies; `tf.rs` is shared with SyncAI-Robot-Sta
 **The repo root is the package itself** (`package.xml` and `Cargo.toml` are at the root); the
 Workspace pulls it into `src/syncai_lio_bridge` with vcstool (replacing the C++ version).
 `.devcontainer/` is only for developing this repo on its own. There is no Makefile,
-docker-compose, params YAML or `interface.repos`: the launch file passes every parameter inline,
-and the node uses only standard message packages.
+docker-compose or `interface.repos`: the node uses only standard message packages. The launch
+file passes every parameter inline but the two that differ between robot models, `lidar_frame`
+and `imu_topic`, which are in `params/models/<robot_model>.yaml` (`g23`, `m20`; 2026-11-25, bare
+`/**` key) and picked by the system INI's `[system] robot_model`; the launch refuses a model with
+no file. A new robot model is a file there, not an edit to the launch or to `subscribers.rs`.
 
 ## Build and test
 
@@ -72,7 +75,7 @@ reach anything real (the real robot is domain 1).
 | File | Responsibility |
 | --- | --- |
 | `mod.rs` | Wiring: parameters → the two publishers → one worker → four subscriptions + one timer |
-| `parameters.rs` | The six load-time parameters (all read-only), Hz -> period, seconds -> tolerance |
+| `parameters.rs` | The seven load-time parameters (all read-only), Hz -> period, seconds -> tolerance |
 | `state.rs` | The worker payload: sample intake, the cached extrinsic, and the publish tick (`on_timer`) |
 | `subscribers.rs` | The four subscriptions and their QoS; `geometry_msgs` -> `geometry` at the boundary |
 | `geometry.rs` | **Pure** `Quaternion` / `Transform` / `Pose2D`, the `tf2` arithmetic; unit-tested |
@@ -133,6 +136,7 @@ lookup's answer; `tf.rs` has a test for exactly that.
   `unsafe_code = "forbid"` and `clippy::all`.
 - Commits use Conventional Commits (`.github/prompt/copilot-commit-message-instructions.md`), in
   English.
-- The launch file is byte-for-byte the C++ package's apart from `lidar_frame`, which names
-  `lidar_top_imu` (the lidar's IMU) since 2026-10 — the README's "Differences from the C++
-  version" has why; a change to how `robot_id` is read belongs in both.
+- The launch file reads `robot_id` as the C++ package's does (a change to that belongs in both)
+  and differs from it in `lidar_frame`: `lidar_top_imu` (the lidar's IMU) since 2026-10, and
+  since 2026-11-25 read with `imu_topic` from the robot model's params file — the README's
+  "Differences from the C++ version" has why.

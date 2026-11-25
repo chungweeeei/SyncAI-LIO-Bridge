@@ -46,7 +46,7 @@ the real chassis publishes none. Nothing else in the stack broadcasts `odom → 
 | Input | Kind | Source | Used for |
 |---|---|---|---|
 | `pointlio/lio_odom` | `nav_msgs/Odometry`, SensorData QoS | Point-LIO | Pose (`lio_odom → lio_body`) and body-frame linear velocity |
-| `livox/imu` | `sensor_msgs/Imu`, SensorData QoS | Livox MID360 driver | Yaw rate |
+| `imu_topic` (G23 `livox/imu`, M20 `/IMU`) | `sensor_msgs/Imu`, SensorData QoS | The IMU Point-LIO's body frame is: the Livox MID360 driver's, or the M20 vendor stack's body IMU | Yaw rate |
 | `base_frame → lidar_frame` | TF (static, via `/tf_static`) | `syncai_bringup`'s URDF | The lidar mount extrinsic |
 | `map_frame → <lio_odom frame>` | TF (via `/tf`) | `syncai_localizer`, **only after relocalize** | The map correction |
 
@@ -82,6 +82,8 @@ odom→base  =  (lio_odom→lio_body) · (base_link→lidar_top_imu)⁻¹
 
 then projected to 2D. The static extrinsic is looked up once and cached; until it resolves, the
 node logs a throttled "waiting for base_link -> lidar_top_imu" and publishes nothing.
+`lidar_top_imu` is the G23's name for that IMU; which link it is comes from the robot model's
+params file (`lidar_frame`, the M20's is `imu`), see "Parameters".
 
 **map → odom.** The AMCL-style correction, computed exactly as AMCL does — the map-frame pose
 minus the odom-frame pose:
@@ -133,9 +135,10 @@ about 0.1 m — inside the stack's z tolerances, but not zero.
 
 ### Angular velocity comes from the IMU
 
-`odom.twist.twist.angular.z` is taken from the lidar IMU's gyro `z`. The IMU is co-located with
-the lidar and the robot is treated as planar, so gyro z is the yaw rate. Linear x/y come from
-LIO's own body-frame twist.
+`odom.twist.twist.angular.z` is the gyro `z` of the IMU Point-LIO's body frame is (`imu_topic`:
+the G23's lidar IMU on `livox/imu`, the M20's body IMU on `/IMU`). The robot is treated as planar,
+so gyro z is the yaw rate. Linear x/y come from LIO's own body-frame twist. Until a first sample
+arrives the value is 0 and the node says so in a throttled WARN.
 
 This is a deliberate choice, not a fallback: `pointlio_node` does fill `twist.angular` from its
 EKF output-model state, but with `gyr_cov_output: 1000.0` that estimate tracks the raw measurement
@@ -160,15 +163,33 @@ mirroring AMCL, where `odom → base_link` exists before an initial pose is give
 
 ### Parameters
 
-There is no params YAML; the launch file passes everything inline. All are **load-time only** and
-declared read-only, so `ros2 param set` is rejected rather than silently ignored.
+The launch file passes everything that is the same on every robot inline; the two values that
+describe the robot's IMU come from **`params/models/<robot_model>.yaml`** (2026-11-25), picked by
+the system INI's `[system] robot_model` (`g23` when the key is absent), the layout
+SyncAI-Robot-State and SyncAI-Robot-Driver-Manager have:
+
+| File | `lidar_frame` | `imu_topic` |
+|---|---|---|
+| `params/models/g23.yaml` | `lidar_top_imu` (the MID360's own IMU, under `lidar_top` in `G23.urdf`) | `livox/imu` (relative, the Livox driver's) |
+| `params/models/m20.yaml` | `imu` (the body IMU in `M20.urdf`) | `/IMU` (absolute: the vendor stack's, published with no namespace) |
+
+Both were written into the launch file and `subscribers.rs` for the G23 until then. On an M20 —
+whose URDF has no `lidar_top_imu`, and whose IMU is not on `livox/imu` — the node waited for its
+extrinsic for good and published nothing. The launch **refuses to start** on a model with no
+file, or a file that leaves either key out or empty (the code defaults are the G23's); the files
+are keyed on a bare `/**`, since rclrs does not expand `/**/lio_bridge_node`. A new model's file
+needs a colcon build of this package before the launch finds it.
+
+All parameters are **load-time only** and declared read-only, so `ros2 param set` is rejected
+rather than silently ignored.
 
 | Parameter | Default (node) | Launch value | Notes |
 |---|---|---|---|
 | `map_frame` | `map` | `map` | Never namespaced |
 | `base_frame` | `base_link` | `<robot_id>/base_link` | |
 | `odom_frame` | `odom` | `<robot_id>/odom` | |
-| `lidar_frame` | `lidar_top_imu` | `<robot_id>/lidar_top_imu` | Must match the URDF's `lidar_top_imu` link (the lidar's IMU); `lidar_top` until 2026-10 |
+| `lidar_frame` | `lidar_top_imu` | `<robot_id>/<the model file's lidar_frame>` | The URDF link of the IMU Point-LIO's body frame is (G23 `lidar_top_imu`, `lidar_top` until 2026-10; M20 `imu`) |
+| `imu_topic` | `livox/imu` | the model file's | `sensor_msgs/Imu` read for the yaw rate; a relative name resolves under `/<robot_id>` |
 | `publish_rate` | `20.0` | `20.0` | Hz; a non-positive or non-finite value falls back to 1 Hz |
 | `transform_tolerance` | `0.1` | `0.1` | Seconds the TF stamp is future-dated; negative / NaN becomes 0 |
 | `use_sim_time` | — | **`false`** | No `/clock` on the real robot; pass `use_sim_time:=true` only against a simulator |
@@ -194,7 +215,8 @@ The node's own log is the fastest diagnosis — each failure mode has a distinct
 | Log line | Missing |
 |---|---|
 | `waiting for pointlio/lio_odom (LIO initializing?)` | Point-LIO is not publishing |
-| `waiting for <id>/base_link -> <id>/lidar_top_imu` | `bringup` / `robot_state_publisher` is not running, or its URDF predates the `lidar_top_imu` link (SyncAI-Robot-Workspace before PR #44) |
+| `waiting for <id>/base_link -> <id>/<lidar_frame>` | `bringup` / `robot_state_publisher` is not running, or its URDF has no such link: a G23 URDF that predates `lidar_top_imu` (SyncAI-Robot-Workspace before PR #44), or a model file naming a link of another robot's URDF |
+| `no sample on imu_topic '…' yet` (WARN) | Nothing is published on `imu_topic`: the odom chain is still published, with the odom topic's `angular.z` at 0. The IMU's driver is down, or the model file names another robot's topic |
 | `waiting for TF (relocalized yet?)` | `/<robot_id>/relocalize` has not been called (and no `[initial_pose]` / `initialpose` has stood in for it) |
 
 ## Why Docker
@@ -299,12 +321,13 @@ have been projected away.
 ├── package.xml
 ├── Cargo.toml / Cargo.lock
 ├── rustfmt.toml / clippy.toml / .editorconfig
-├── launch/lio_bridge.launch.py     # reads robot_id from system.ini; identical to the C++ one
+├── launch/lio_bridge.launch.py     # reads robot_id and robot_model from system.ini
+├── params/models/<robot_model>.yaml  # g23, m20: lidar_frame and imu_topic (bare /** key)
 ├── src/
 │   ├── main.rs
 │   └── lio_bridge_node/
 │       ├── mod.rs          # wiring: parameters → publishers → one worker → subscriptions + timer
-│       ├── parameters.rs   # the six load-time parameters, Hz -> period, seconds -> tolerance
+│       ├── parameters.rs   # the seven load-time parameters, Hz -> period, seconds -> tolerance
 │       ├── state.rs        # the worker payload, sample intake, and the publish tick
 │       ├── subscribers.rs  # the four subscriptions and their QoS; geometry_msgs -> geometry
 │       ├── geometry.rs     # Quaternion / Transform / Pose2D: the tf2 arithmetic  (pure, unit-tested)
@@ -359,6 +382,10 @@ robot, the same split `tf.rs` has in syncai_robot_state.
   plane. SyncAI-Robot-Workspace's URDF has carried both links since its PR #44 — `lidar_top`
   for the lidar, the frame its cloud is stamped with, and `lidar_top_imu` under it at `-t_il` —
   and this is the one place the launch file differs from the C++ one.
+* **`lidar_frame` and the IMU topic are per robot model** (2026-11-25): `params/models/<robot_model>.yaml`,
+  read by the launch (see "Parameters"). The C++ version has one robot's values in its launch and
+  the IMU topic in its source; the `imu_topic` parameter, the launch's model lookup and the WARN
+  while no IMU sample has arrived are this port's.
 * **Log lines carry a `[LioBridge]` / `[Parameters]` prefix**, following the convention of the
   other Rust nodes. The message text after the prefix is the C++ text, so the diagnosis table
   above still greps.
@@ -369,9 +396,9 @@ robot, the same split `tf.rs` has in syncai_robot_state.
   there is no `/clock`; with `use_sim_time: true` `now()` returns zero and every TF stamp and odom
   header is garbage. The byobu session launches this node with no arguments, so do not flip the
   launch default without also editing `config/sessions/start_nav.yaml` in the Workspace.
-- **`lidar_frame` must name a real frame.** It comes from the URDF's `lidar_top_joint` and
-  `lidar_top_imu_joint`, published by `bringup` — so this node needs a Workspace whose URDF has
-  the `lidar_top_imu` link (PR #44 onwards). Without it the node publishes *nothing at all* — not even the odom chain — because
+- **`lidar_frame` must name a real frame.** On the G23 it comes from the URDF's `lidar_top_joint`
+  and `lidar_top_imu_joint`, published by `bringup` — so this node needs a Workspace whose URDF has
+  the `lidar_top_imu` link (PR #44 onwards); on the M20 it is `M20.urdf`'s `imu`. Without it the node publishes *nothing at all* — not even the odom chain — because
   the extrinsic lookup gates the whole timer body.
 - **The odom pose is a planar projection**, so `position.z` is always 0 and the orientation only
   has a yaw component. Do not use this topic as a 3D pose source; `pointlio/lio_odom` is the full

@@ -1,7 +1,11 @@
 //! The four subscriptions, all on the node's single worker.
 //!
-//! `pointlio/lio_odom` and `livox/imu` are relative so they inherit the `<robot_id>` namespace,
-//! like every other topic in the stack. `/tf` and `/tf_static` are absolute because TF is global
+//! `pointlio/lio_odom` is relative so it inherits the `<robot_id>` namespace, like every other
+//! topic in the stack, and so is the G23's IMU topic (`livox/imu`). The IMU topic is the
+//! `imu_topic` parameter since 2026-11 because the M20's is not ours: the vendor stack publishes
+//! its body IMU on an absolute `/IMU`, with no namespace, and a name hard-coded here left the
+//! odom topic's yaw rate at zero on that robot with nothing said.
+//! `/tf` and `/tf_static` are absolute because TF is global
 //! in ROS 2 — which is why the launch file prefixes the FRAME names (`<robot_id>/base_link`)
 //! instead: frames are how this stack separates robots that share one `/tf`.
 //!
@@ -32,7 +36,7 @@ pub struct Subscriptions {
 }
 
 impl Subscriptions {
-    pub fn create(worker: &Worker<LioBridgeData>) -> Result<Self, RclrsError> {
+    pub fn create(worker: &Worker<LioBridgeData>, imu_topic: &str) -> Result<Self, RclrsError> {
         Ok(Self {
             // From Point-LIO. Sensor-data QoS (best-effort) on both sensor subscriptions: it is
             // compatible with either a reliable (lio_node) or a best-effort publisher.
@@ -47,9 +51,11 @@ impl Subscriptions {
                 },
             )?,
 
-            // From the Livox MID360 driver.
+            // The IMU Point-LIO's body frame is: the Livox MID360 driver's on the G23, the
+            // vendor's body IMU on the M20 (whose writer is reliable; a best-effort reader
+            // matches either).
             _imu: worker.create_subscription(
-                "livox/imu".sensor_data_qos(),
+                imu_topic.sensor_data_qos(),
                 |data: &mut LioBridgeData, msg: Imu| {
                     data.accept_imu(msg.angular_velocity.z);
                 },

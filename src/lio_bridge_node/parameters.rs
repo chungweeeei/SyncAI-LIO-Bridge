@@ -65,10 +65,15 @@ pub struct Config {
     /// `<robot_id>/` itself.
     pub base_frame: String,
     pub odom_frame: String,
-    /// Must name the URDF's link for the lidar's IMU (`lidar_top_imu`), published by
-    /// `syncai_bringup`. Without it the node publishes nothing at all — the extrinsic lookup gates
-    /// the whole timer body.
+    /// Must name the URDF's link for the IMU Point-LIO's body frame physically is, published by
+    /// `syncai_bringup`: the G23's `lidar_top_imu` (its MID360's IMU), the M20's `imu` (the body
+    /// IMU). The robot model's params file names it and the launch prefixes it. Without it the
+    /// node publishes nothing at all — the extrinsic lookup gates the whole timer body.
     pub lidar_frame: String,
+    /// Where that IMU's samples are, for the yaw rate: relative (`livox/imu`, under
+    /// `/<robot_id>`) for the G23's Livox driver, absolute (`/IMU`) for the M20, whose IMU is the
+    /// vendor stack's and published with no namespace. From the robot model's params file.
+    pub imu_topic: String,
     pub publish_period: Duration,
     /// How far ahead of `now` every TF stamp is dated, the same trick AMCL uses: consumers can
     /// interpolate up to that far ahead without hitting an extrapolation error, which also
@@ -92,6 +97,7 @@ pub struct Parameters {
     _base_frame: ReadOnlyParameter<Arc<str>>,
     _odom_frame: ReadOnlyParameter<Arc<str>>,
     _lidar_frame: ReadOnlyParameter<Arc<str>>,
+    _imu_topic: ReadOnlyParameter<Arc<str>>,
     _publish_rate: ReadOnlyParameter<f64>,
     _transform_tolerance: ReadOnlyParameter<f64>,
 }
@@ -127,7 +133,14 @@ impl Parameters {
         let lidar_frame = text(
             "lidar_frame",
             "lidar_top_imu",
-            "the URDF link of the lidar IMU Point-LIO's body frame physically is; must exist in TF",
+            "the URDF link of the IMU Point-LIO's body frame physically is; must exist in TF. \
+             From the robot model's params file (g23: lidar_top_imu, m20: imu)",
+        )?;
+        let imu_topic = text(
+            "imu_topic",
+            "livox/imu",
+            "sensor_msgs/Imu topic of that IMU, read for the yaw rate; relative names resolve \
+             under /<robot_id>. From the robot model's params file (g23: livox/imu, m20: /IMU)",
         )?;
         let publish_rate = number(
             "publish_rate",
@@ -155,6 +168,7 @@ impl Parameters {
             base_frame: base_frame.get().to_string(),
             odom_frame: odom_frame.get().to_string(),
             lidar_frame: lidar_frame.get().to_string(),
+            imu_topic: imu_topic.get().to_string(),
             publish_period: period_from_rate(publish_rate.get()),
             transform_tolerance: tolerance,
         };
@@ -169,6 +183,11 @@ impl Parameters {
         );
         log_info!(
             node.logger(),
+            "[Parameters] yaw rate from '{}'",
+            config.imu_topic,
+        );
+        log_info!(
+            node.logger(),
             "[Parameters] publish every {:?}, TF stamps future-dated by {:?}",
             config.publish_period,
             config.transform_tolerance,
@@ -180,6 +199,7 @@ impl Parameters {
                 _base_frame: base_frame,
                 _odom_frame: odom_frame,
                 _lidar_frame: lidar_frame,
+                _imu_topic: imu_topic,
                 _publish_rate: publish_rate,
                 _transform_tolerance: transform_tolerance,
             },

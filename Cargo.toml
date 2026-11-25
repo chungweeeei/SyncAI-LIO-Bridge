@@ -14,10 +14,11 @@ rclrs = "0.8"
 # API of the other (in particular, do not use `Time::to_ros_msg`; the stamp is built by hand).
 ros-env = "0.2"
 
-# Install launch/ into share/syncai_lio_bridge/ so `ros2 launch` finds it. There is no params/
-# directory: like the C++ version, the launch file passes every parameter inline.
+# Install launch/ and params/ into share/syncai_lio_bridge/ so `ros2 launch` finds them. params/
+# holds only the per-robot-model files (params/models/<robot_model>.yaml, 2026-11): what is the
+# same on every robot the launch file still passes inline, like the C++ version.
 [package.metadata.ros]
-install_to_share = ["launch"]
+install_to_share = ["launch", "params"]
 
 [lints.rust]
 unsafe_code = "forbid"
